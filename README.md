@@ -1,8 +1,8 @@
-# Annix-Geo H2 — Part 1
+# Annix Geo H2 — Part 1
 
 **Subsurface hydrogen leak detection through aquifer migration modelling and geochemical signature analysis.**
 
-The first child of Annix-Geo. An industrial-tier AI tool that solves two specific problems Cerulean Energy must answer for every natural hydrogen target:
+The first product in the **Annix Geo** family (sibling: **Annix Geo Minerals**). An industrial-tier AI tool that solves two specific problems Cerulean Energy must answer for every natural hydrogen target:
 
 1. Model subsurface gas migration through aquifers
 2. Identify the geochemical signature in deep groundwater that indicates a major hydrogen source is leaking from below
@@ -84,7 +84,7 @@ The point of this build is to demonstrate that Cerulean's methodology produces p
 
 ## Next steps
 
-Part 2 of Annix-Geo H2 will add the two safety guarantees:
+Part 2 of Annix Geo H2 will add the two safety guarantees:
 
 - The gas will not migrate and contaminate shallow drinking-water aquifers
 - Pressure changes will not destabilise the surrounding rock formations

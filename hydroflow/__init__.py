@@ -3,7 +3,7 @@ annix_geo_h2.hydroflow
 ─────────────────────────────────────────────────────────────────────────────
 Physics layer — multiphase porous-media flow + dissolved hydrogen transport.
 
-Implements the equations specified by Perplexity for Annix-Geo H2:
+Implements the equations specified by Perplexity for Annix Geo H2:
 
   ∂/∂t (φ ρ_α S_α) + ∇·(ρ_α u_α) = q_α
   u_α = -k k_rα/μ_α (∇p_α - ρ_α g)
@@ -14,7 +14,7 @@ Implements the equations specified by Perplexity for Annix-Geo H2:
 This is a 1D vertical column solver — minimum viable scope that captures the
 correct physics. Production version swaps in DuMux. Architecture stays identical.
 
-Author: Annix-Geo H2 v0.1
+Author: Annix Geo H2 v0.1
 """
 
 import numpy as np

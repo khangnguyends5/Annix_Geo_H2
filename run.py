@@ -1,5 +1,5 @@
 """
-Annix-Geo H2 — CLI entry point.
+Annix Geo H2 — CLI entry point.
 
 Run from the project root:
     python run.py              # full demo, both scenarios
