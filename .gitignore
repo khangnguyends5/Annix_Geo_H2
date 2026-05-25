@@ -12,3 +12,4 @@ Thumbs.db
 # Generated artefacts
 dossiers/*.md
 !dossiers/.gitkeep
+!dossiers/rev_aden_dome.md      # flagship dossier #1 — track in git as example
