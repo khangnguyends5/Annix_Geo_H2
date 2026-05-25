@@ -29,6 +29,27 @@ python run.py --leak       # leak scenario only
 python run.py --natural    # natural reducing zone only
 ```
 
+## Generate a customer dossier
+
+The `dossier.py` module wires the simulation pipeline into `annix_intel` for
+live AGS data + Claude-orchestrated narrative. Output is a 3-page Markdown
+file ready to email to a CEO or chief geologist.
+
+```bash
+# Requires sibling annix_intel/ checkout. Set ANTHROPIC_API_KEY for the
+# real LLM verdict; otherwise falls back to a stub that still renders the
+# full simulation + classifier output.
+python dossier.py \
+    --operator "Acme Hydrogen Corp" \
+    --block    "Wabamun-N Block 4" \
+    --bbox     -114.5 53.2 -113.8 53.6 \
+    --formation Duperow \
+    --out      dossiers/acme_wabamun_n4.md
+```
+
+If `VOYAGE_API_KEY` is set and the RAG corpus has been built, the LLM
+verdict is grounded in retrieved geological literature with citations.
+
 ## What it does
 
 The tool simulates a 2 km vertical aquifer column with:
