@@ -17,7 +17,10 @@ annix_geo_h2/
 ├── hydrochem/           # Layer 3 — Redox reaction kinetics (5 reactions)
 ├── source_detect/       # Layer 4 — Anomaly scoring (redox pattern detection)
 ├── uncertainty/         # Layer 5 — Monte Carlo classification (4 categories)
+├── containment/         # Layer 6 — Safety guarantee #1: drinking-water aquifer
+├── geomechanics/        # Layer 7 — Safety guarantee #2: rock-formation stability
 ├── demo/                # Synthetic Saskatchewan Duperow aquifer
+├── dossier.py           # Customer dossier generator (uses annix_intel)
 └── run.py               # CLI entry point
 ```
 
@@ -84,7 +87,30 @@ The point of this build is to demonstrate that Cerulean's methodology produces p
 
 ## Next steps
 
-Part 2 of Annix Geo H2 will add the two safety guarantees:
+**Part 2 — Safety guarantees — shipped in v0.2.**
 
-- The gas will not migrate and contaminate shallow drinking-water aquifers
-- Pressure changes will not destabilise the surrounding rock formations
+Two new layers (`containment/` and `geomechanics/`) compute pass/fail
+verdicts on the two regulatory requirements any natural-hydrogen developer
+must answer:
+
+1. **Drinking-water aquifer protection.** Brooks-Corey seal capacity check
+   against the predicted gas column, AGS fault-intersection risk score, and
+   a 100-year analytical prediction of dissolved H₂ in the protected aquifer
+   versus the USDW threshold (1e-6 mol/L). Output: classification ∈
+   {Strong, Adequate, At-risk, Insufficient containment} + a
+   recommended monitoring program.
+
+2. **Rock-formation stability.** Andersonian initial stress at the source
+   depth, radial-Darcy pressure drawdown over the project life, Mohr-Coulomb
+   margin to frictional failure, Geertsma uniaxial subsidence rate, and an
+   induced-seismicity risk score from fault distance × pressure change.
+   Output: classification ∈ {Stable, Monitor, At-risk, Critical} +
+   recommended pressure-monitoring + InSAR program.
+
+Both modules are MVP-grade (same caveat as the rest of the codebase — swap
+to OpenGeoSys/PFLOTRAN-FLAC for THM-coupled production simulation when a
+customer requires it). The classifier output schemas are stable; the
+implementations can be swapped without changing downstream code.
+
+Sections 7 and 8 of every generated dossier now carry the pass/fail
+verdicts, the underlying numbers, and the monitoring recommendations.

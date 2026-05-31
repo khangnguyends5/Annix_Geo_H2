@@ -43,9 +43,13 @@ from hydroflow import AquiferColumn, initial_conditions, darcy_two_phase_step, d
 from hydrochem import ReactionRates, reaction_step, initial_chemistry                              # noqa: E402
 from source_detect import score_profile                                                            # noqa: E402
 from uncertainty import monte_carlo_ensemble, classify                                             # noqa: E402
+from containment import evaluate_containment, ContainmentResult                                    # noqa: E402
+from geomechanics import evaluate_geomechanics, GeomechResult                                      # noqa: E402
 
 # annix_intel
-from annix_intel.ingest import fetch_ags_wells, fetch_ags_formation_tops, AGSError                 # noqa: E402
+from annix_intel.ingest import (
+    fetch_ags_wells, fetch_ags_formation_tops, fetch_ags_faults, AGSError,                         # noqa: E402
+)
 from annix_intel.llm.orchestrator import evaluate_claim_block, DossierResult                       # noqa: E402
 
 try:
@@ -85,6 +89,8 @@ class DossierOutputs:
     coherence:          float
     estimated_source_depth: Optional[float]
     llm_verdict:        DossierResult
+    containment:        ContainmentResult            # safety guarantee #1
+    geomechanics:       GeomechResult                # safety guarantee #2
     rendered_markdown:  str
     generated_at:       datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -126,12 +132,30 @@ def generate_dossier(inputs: DossierInputs) -> DossierOutputs:
         aquifer_top             = aquifer.aquifer_top,
     )
 
-    # ── 5. LLM verdict (with optional RAG context) ──────────────────────────
+    # ── 5. Safety guarantees ────────────────────────────────────────────────
+    fault_layer = _fetch_faults_optional(inputs)
+    containment = evaluate_containment(
+        aquifer,
+        source_rate_kg_s=inputs.h2_source_kg_s,
+        project_life_years=100.0,
+        fault_layer=fault_layer,
+    )
+    geomech = evaluate_geomechanics(
+        aquifer,
+        production_rate_kg_s=inputs.h2_source_kg_s,
+        project_life_years=30.0,
+        fault_layer=fault_layer,
+    )
+    log.info("Safety: containment=%s, geomechanics=%s",
+             containment.category, geomech.category)
+
+    # ── 6. LLM verdict (with optional RAG context) ──────────────────────────
     verdict = _call_llm(inputs, aquifer, score, classification, wells, picks_layer)
 
-    # ── 6. Render Markdown ──────────────────────────────────────────────────
+    # ── 7. Render Markdown ──────────────────────────────────────────────────
     md = _render_markdown(
         inputs, wells, picks_layer, aquifer, chem, score, classification, verdict,
+        containment, geomech,
     )
 
     return DossierOutputs(
@@ -146,11 +170,24 @@ def generate_dossier(inputs: DossierInputs) -> DossierOutputs:
         coherence=classification.spatial_coherence,
         estimated_source_depth=score["source_depth_estimate"],
         llm_verdict=verdict,
+        containment=containment,
+        geomechanics=geomech,
         rendered_markdown=md,
     )
 
 
 # ─── Pipeline steps ──────────────────────────────────────────────────────────
+def _fetch_faults_optional(inputs: DossierInputs):
+    """Pull AGS fault traces in the bbox. Returns None if AGS is unavailable
+    or no faults found — the safety modules handle the None case."""
+    try:
+        return fetch_ags_faults(bbox=inputs.bbox_wgs84, max_records=500)
+    except AGSError as e:
+        log.warning("AGS fault layer unavailable (%s) — safety modules will "
+                    "use conservative no-fault defaults.", e)
+        return None
+
+
 def _fetch_block_geology(inputs: DossierInputs) -> tuple[list, dict]:
     """Pull AGS wells + the picks layer for the target formation."""
     try:
@@ -327,8 +364,9 @@ def _call_llm(inputs, aquifer, score, classification, wells, picks_layer) -> Dos
 # ─── Markdown renderer ───────────────────────────────────────────────────────
 def _render_markdown(
     inputs, wells, picks_layer, aquifer, chem, score, classification, verdict,
+    containment, geomech,
 ) -> str:
-    """3-page dossier. Cover → executive verdict → findings → next steps → refs."""
+    """3-page dossier. Cover → executive verdict → findings → safety guarantees → refs."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     coords = ", ".join(f"{c:+.4f}" for c in inputs.bbox_wgs84)
     depth_stats = picks_layer.get("depth_stats") or {}
@@ -409,7 +447,60 @@ def _render_markdown(
             f"- ⚠ {q}\n" for q in classification.quality_flags
         ) + "\n")
 
-    parts.append("## 7. Citations\n\n")
+    # ── Section 7 — Containment guarantee (USDW protection) ─────────────────
+    pass_icon_c = "✅" if containment.passes_aquifer_guarantee else "❌"
+    parts.append(
+        f"## 7. Safety guarantee #1 — drinking-water aquifer protection\n\n"
+        f"**{pass_icon_c} Classification:** {containment.category}  \n"
+        f"**Passes USDW protection guarantee:** "
+        f"{'YES' if containment.passes_aquifer_guarantee else 'NO'}\n\n"
+        f"| Metric | Value |\n"
+        f"|---|---|\n"
+        f"| Seal capacity (Brooks-Corey) | {containment.seal_capacity_m:.0f} m gas column |\n"
+        f"| Predicted gas column @ 100 yr | {containment.actual_gas_column_m:.2f} m |\n"
+        f"| Seal safety factor | {containment.seal_safety_factor:.2f}× |\n"
+        f"| Mapped fault intersections | {containment.fault_intersections_n} |\n"
+        f"| Fault risk score | {containment.fault_risk_score:.2f} (0 = none, 1 = severe) |\n"
+        f"| Predicted aquifer H₂ @ 100 yr | {containment.predicted_aquifer_h2_100yr:.2e} mol/L |\n"
+        f"| USDW protection threshold | {containment.usdw_threshold:.0e} mol/L |\n\n"
+        f"**Analysis:** {containment.explanation}\n\n"
+        f"**Recommended monitoring program:**\n\n"
+        + "".join(f"- {r}\n" for r in containment.recommended_monitoring)
+        + ("\n**Quality flags:**\n\n"
+           + "".join(f"- ⚠ {q}\n" for q in containment.quality_flags) + "\n"
+           if containment.quality_flags else "\n")
+    )
+
+    # ── Section 8 — Geomechanics stability guarantee ────────────────────────
+    pass_icon_g = "✅" if geomech.passes_stability_guarantee else "❌"
+    parts.append(
+        f"## 8. Safety guarantee #2 — rock-formation stability\n\n"
+        f"**{pass_icon_g} Classification:** {geomech.category}  \n"
+        f"**Passes stability guarantee:** "
+        f"{'YES' if geomech.passes_stability_guarantee else 'NO'}\n\n"
+        f"| Metric | Value |\n"
+        f"|---|---|\n"
+        f"| Vertical stress Sv (lithostatic) | {geomech.pre_production_sv_mpa:.1f} MPa |\n"
+        f"| Min horizontal stress Shmin | {geomech.pre_production_shmin_mpa:.1f} MPa |\n"
+        f"| Max horizontal stress SHmax | {geomech.pre_production_shmax_mpa:.1f} MPa |\n"
+        f"| Initial pore pressure | {geomech.initial_pore_pressure_mpa:.1f} MPa |\n"
+        f"| Predicted drawdown (30 yr) | {geomech.pressure_drawdown_mpa:.2f} MPa |\n"
+        f"| Mohr-Coulomb margin | {geomech.mohr_coulomb_margin_mpa:.2f} MPa "
+        f"({'safe' if geomech.mohr_coulomb_margin_mpa > 0 else 'FAILURE'}) |\n"
+        f"| Geertsma subsidence | {geomech.subsidence_mm_per_year:.2f} mm/yr |\n"
+        f"| Induced-seismicity risk | {geomech.induced_seismicity_risk} |\n"
+        f"| Nearest mapped fault | "
+        f"{geomech.nearest_fault_km if geomech.nearest_fault_km is not None else 'unmapped'} km |\n\n"
+        f"**Analysis:** {geomech.explanation}\n\n"
+        f"**Recommended pressure-monitoring program:**\n\n"
+        + "".join(f"- {r}\n" for r in geomech.recommended_pressure_monitoring)
+        + ("\n**Quality flags:**\n\n"
+           + "".join(f"- ⚠ {q}\n" for q in geomech.quality_flags) + "\n"
+           if geomech.quality_flags else "\n")
+    )
+
+    # ── Section 9 — Citations ───────────────────────────────────────────────
+    parts.append("## 9. Citations\n\n")
     if verdict.citations:
         for c in verdict.citations:
             parts[-1] += f"- {c}\n"
@@ -470,12 +561,16 @@ def _cli() -> int:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(out.rendered_markdown, encoding="utf-8")
         print(f"Dossier written: {args.out}")
-        print(f"  Classification:    {out.classification}")
-        print(f"  Leak likelihood:   {out.leak_likelihood:.3f}")
-        print(f"  Wells in block:    {out.wells_in_block}")
-        print(f"  Formation picks:   {out.formation_picks}")
-        print(f"  LLM model:         {out.llm_verdict.model or 'stub'}")
-        print(f"  LLM tool calls:    {len(out.llm_verdict.tool_calls)}")
+        print(f"  Classification:        {out.classification}")
+        print(f"  Leak likelihood:       {out.leak_likelihood:.3f}")
+        print(f"  Wells in block:        {out.wells_in_block}")
+        print(f"  Formation picks:       {out.formation_picks}")
+        print(f"  Containment:           {out.containment.category} "
+              f"(passes: {out.containment.passes_aquifer_guarantee})")
+        print(f"  Geomechanics:          {out.geomechanics.category} "
+              f"(passes: {out.geomechanics.passes_stability_guarantee})")
+        print(f"  LLM model:             {out.llm_verdict.model or 'stub'}")
+        print(f"  LLM tool calls:        {len(out.llm_verdict.tool_calls)}")
     else:
         print(out.rendered_markdown)
     return 0
